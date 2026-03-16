@@ -104,6 +104,15 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     }
   }, [funnelConfigs, activeStages, results, onSave]);
 
+  const ensureStageActive = (stage: FunnelStage) => {
+    setActiveStages(prev => {
+      if (prev.has(stage)) return prev;
+      const next = new Set(prev);
+      next.add(stage);
+      return next;
+    });
+  };
+
   const toggleFunnelStage = (stage: FunnelStage) => {
     setActiveStages(prev => {
       const next = new Set(prev);
@@ -117,12 +126,14 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   };
 
   const toggleVideo = (stage: FunnelStage) => {
+    ensureStageActive(stage);
     setFunnelConfigs(prev => prev.map(f => 
       f.stage === stage ? { ...f, videoIncluded: !f.videoIncluded } : f
     ));
   };
 
   const toggleChannel = (stage: FunnelStage, partner: Partner) => {
+    ensureStageActive(stage);
     setFunnelConfigs(prev => prev.map(f => {
       if (f.stage === stage) {
         const isSelected = f.channels.includes(partner);
@@ -151,6 +162,7 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   };
 
   const toggleInventory = (stage: FunnelStage, inventory: string) => {
+    ensureStageActive(stage);
     setFunnelConfigs(prev => prev.map(f => {
       if (f.stage === stage) {
         const selectedInventories = f.selectedInventories.includes(inventory)
