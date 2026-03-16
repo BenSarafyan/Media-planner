@@ -55,22 +55,33 @@ export const adminService = {
   },
 
   getPlatformsByStage: async (stage: string): Promise<Platform[]> => {
-    const { data, error } = await supabase
-      .from('ad_formats')
-      .select(`
-        platform:platforms!inner(id, name)
-      `)
-      .eq('funnel_stage', stage);
+    try {
+      // Fetch all platforms that have ad formats for this specific stage
+      const { data, error } = await supabase
+        .from('platforms')
+        .select(`
+          id,
+          name,
+          ad_formats!inner(funnel_stage)
+        `)
+        .eq('ad_formats.funnel_stage', stage);
 
-    if (error) {
-      console.error('Error fetching platforms by stage:', error);
+      if (error) {
+        console.error(`Error fetching platforms for stage ${stage}:`, error);
+        return [];
+      }
+
+      if (!data) return [];
+
+      // Sort unique platforms by name
+      return (data as any[]).map(p => ({
+        id: p.id,
+        name: p.name
+      })).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      console.error('Unexpected error in getPlatformsByStage:', err);
       return [];
     }
-
-    // Extract unique platforms and sort by name
-    const platforms = (data as any[]).map(item => item.platform);
-    const uniquePlatforms = Array.from(new Map(platforms.map(p => [p.id, p])).values()) as Platform[];
-    return uniquePlatforms.sort((a, b) => a.name.localeCompare(b.name));
   },
 
   getInventories: async (platformId?: string): Promise<Inventory[]> => {
