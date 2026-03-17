@@ -23,8 +23,6 @@ function App() {
     setProjectSubTab,
     isSidebarCollapsed,
     setIsSidebarCollapsed,
-    isSidebarHovered,
-    setIsSidebarHovered,
     isCollapsed,
     handleStartSetup,
     handleCampaignReady,
