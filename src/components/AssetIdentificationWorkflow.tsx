@@ -8,7 +8,7 @@ interface AssetIdentificationWorkflowProps {
   onBack: () => void;
   campaignData: Campaign | null;
   onSave?: (assets: RecommendedAsset[], config: any[]) => void;
-  onSaveMasters?: (masters: any[]) => void;
+  onSaveMasters?: (masters: any[]) => Promise<void> | void;
   isEmbedded?: boolean;
   initialConfig?: any[];
   viewMode?: 'strategy' | 'requirements';
@@ -311,13 +311,13 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     }));
   };
 
-  const handleGroupMasters = () => {
+  const handleGroupMasters = async () => {
+    const masters = assetService.groupMasterAssets(results);
     if (onSaveMasters) {
-      const masters = assetService.groupMasterAssets(results);
-      onSaveMasters(masters);
-      // Change tab to creative masters if callback provided
-      onSubTabChange?.('creative-masters');
+      await onSaveMasters(masters);
     }
+    // Navigate to creative masters tab after saving
+    onSubTabChange?.('creative-masters');
   };
 
   // Filtering logic for the slicer
@@ -335,9 +335,22 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     return channelMatch && platformMatch && typeMatch && statusMatch;
   });
 
-  // Calculate summary stats
+  // Calculate summary stats — reflects current filter selection
   const stats = React.useMemo(() => {
-    const activeResults = results;
+    // Use filteredResults to reflect the right-nav slicer selection
+    // We need filteredResults here but it's computed below — so recompute inline
+    const activeResults = results.filter(asset => {
+      const channelMatch = !selectedChannelFilter || asset.channel === selectedChannelFilter;
+      const platformMatch = !selectedPlatformFilter || asset.platform === selectedPlatformFilter;
+      const typeMatch = selectedTypeFilter === 'all' || 
+                      (selectedTypeFilter === 'video' && asset.requiresVideo) ||
+                      (selectedTypeFilter === 'static' && !asset.requiresVideo);
+      const statusMatch = selectedStatusFilter === 'all' ||
+                        (selectedStatusFilter === 'deselected' && !asset.selected) ||
+                        (selectedStatusFilter === 'edited' && asset.isEdited && asset.selected);
+      return channelMatch && platformMatch && typeMatch && statusMatch;
+    });
+
     const channels = new Set(activeResults.map(r => r.channel));
     const platforms = new Set(activeResults.map(r => r.platform));
     const formats = new Set(activeResults.map(r => r.formatName));
@@ -372,7 +385,7 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
       editedRowsCount,
       variantsDeselected
     };
-  }, [results]);
+  }, [results, selectedChannelFilter, selectedPlatformFilter, selectedTypeFilter, selectedStatusFilter]);
 
   const uniqueChannels = Array.from(new Set(results.map(r => r.channel))).sort();
   const uniquePlatforms = selectedChannelFilter 
@@ -545,6 +558,20 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
               <span className="results-count">{filteredResults.length} assets identified</span>
             </div>
             <div className="header-actions">
+              <button className="btn-generate-premium small" onClick={() => setShowUpdateConfirmModal(true)} disabled={activeStages.size === 0}>
+                <span className="material-icons-outlined">auto_awesome</span>
+                Update Assets
+              </button>
+              <div className="actions-divider"></div>
+              <button 
+                className="btn-generate-premium small" 
+                onClick={handleGroupMasters} 
+                disabled={results.length === 0}
+              >
+                <span className="material-icons-outlined">hub</span>
+                Group Masters
+              </button>
+              <div className="actions-divider"></div>
               <div className="view-toggle-premium">
                 <button 
                   className={`toggle-icon-btn ${resultsDisplayMode === 'grid' ? 'active' : ''}`}
@@ -569,21 +596,6 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
               >
                 <span className="material-icons-outlined">filter_list</span>
                 <span>Filters</span>
-              </button>
-              <div className="actions-divider"></div>
-              <button className="btn-generate-premium small" onClick={() => setShowUpdateConfirmModal(true)} disabled={activeStages.size === 0}>
-                <span className="material-icons-outlined">auto_awesome</span>
-                Update Assets
-              </button>
-              <div className="actions-divider"></div>
-              <button 
-                className="btn-primary-ghost small" 
-                onClick={handleGroupMasters} 
-                disabled={results.length === 0}
-                style={{ height: '36px', padding: '0 12px' }}
-              >
-                <span className="material-icons-outlined">Groups</span>
-                Group Masters
               </button>
             </div>
           </div>

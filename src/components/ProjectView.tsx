@@ -41,17 +41,21 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, ac
   };
 
   const handleSaveMasters = async (masters: MasterAsset[]) => {
+    // Optimistically update local state so the UI reflects changes immediately
+    setCurrentMasters(masters);
+    if (onUpdate) {
+      onUpdate({
+        ...campaign,
+        master_assets: masters
+      });
+    }
+    // Best-effort DB save — if master_assets column doesn't exist yet, log but don't block
     const success = await campaignService.updateCampaignMasterAssets(campaign.id, masters);
-    if (success) {
-      setCurrentMasters(masters);
-      if (onUpdate) {
-        onUpdate({
-          ...campaign,
-          master_assets: masters
-        });
-      }
+    if (!success) {
+      console.warn('Could not persist master assets to DB — column may not exist yet. UI state still updated.');
     }
   };
+
 
   // Removed overlay logic to embed in tab instead
 
