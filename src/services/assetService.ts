@@ -17,6 +17,7 @@ export interface RecommendedAsset {
   channel: string;       // Platform Name (e.g., Meta, Google Ads)
   platform: string;      // Inventory Name (e.g., Instagram Feed)
   formatName: string;    // Ad Format Name (e.g., Stories Video)
+  funnelStage: FunnelStage;
   aspectRatios: string;  // Aggregated "1:1, 9:16"
   lengths: string;       // Aggregated "15s, 30s"
   requiresVideo: boolean;
@@ -26,6 +27,19 @@ export interface RecommendedAsset {
   availableLengths: string[];
   selectedRatios: string[];
   selectedLengths: string[];
+}
+
+export interface MasterAsset {
+  id: string;
+  funnelStage: FunnelStage;
+  type: 'Video' | 'Static';
+  ratio: string;
+  length: string;
+  originalAssets: {
+    channel: string;
+    platform: string;
+    formatName: string;
+  }[];
 }
 
 export const assetService = {
@@ -53,9 +67,10 @@ export const assetService = {
       dbQuery = dbQuery.in('inventory.name', query.selectedInventories);
     }
 
-    // If hero video is NOT available, we might want to filter out formats that strictly REQUIRE video
-    // (though the user might still want to see them as requirements). 
-    // For now, let's keep it simple and return what matches the stage and platform.
+    // Filter out assets that require video if hero video is NOT available
+    if (!query.heroVideoAvailable) {
+      dbQuery = dbQuery.eq('requires_video', false);
+    }
     
     const { data, error } = await dbQuery;
 
@@ -78,6 +93,7 @@ export const assetService = {
         channel: format.platform.name,
         platform: format.inventory.name,
         formatName: format.name,
+        funnelStage: format.funnel_stage as FunnelStage,
         aspectRatios: uniqueRatios.length > 0 ? uniqueRatios.join(', ') : '-',
         lengths: uniqueLengths.length > 0 ? uniqueLengths.join(', ') : '-',
         requiresVideo: !!format.requires_video,
@@ -89,6 +105,53 @@ export const assetService = {
         selectedLengths: uniqueLengths
       };
     });
+  },
+
+  groupMasterAssets: (assets: RecommendedAsset[]): MasterAsset[] => {
+    const masters: Record<string, MasterAsset> = {};
+
+    assets.filter(a => a.selected).forEach(asset => {
+      const type = asset.requiresVideo ? 'Video' : 'Static';
+      const ratios = asset.selectedRatios;
+      const lengths = asset.selectedLengths;
+
+      // For each combination of ratio and length in the asset
+      ratios.forEach(ratio => {
+        const lengthsToUse = type === 'Video' ? lengths : ['-'];
+        
+        lengthsToUse.forEach(length => {
+          const key = `${asset.funnelStage}|${type}|${ratio}|${length}`;
+          
+          if (!masters[key]) {
+            masters[key] = {
+              id: crypto.randomUUID(),
+              funnelStage: asset.funnelStage,
+              type,
+              ratio,
+              length,
+              originalAssets: []
+            };
+          }
+
+          // Avoid duplicates in original assets
+          const exists = masters[key].originalAssets.some(oa => 
+            oa.channel === asset.channel && 
+            oa.platform === asset.platform && 
+            oa.formatName === asset.formatName
+          );
+
+          if (!exists) {
+            masters[key].originalAssets.push({
+              channel: asset.channel,
+              platform: asset.platform,
+              formatName: asset.formatName
+            });
+          }
+        });
+      });
+    });
+
+    return Object.values(masters);
   }
 };
 

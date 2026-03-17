@@ -8,10 +8,11 @@ interface AssetIdentificationWorkflowProps {
   onBack: () => void;
   campaignData: Campaign | null;
   onSave?: (assets: RecommendedAsset[], config: any[]) => void;
+  onSaveMasters?: (masters: any[]) => void;
   isEmbedded?: boolean;
   initialConfig?: any[];
   viewMode?: 'strategy' | 'requirements';
-  onSubTabChange?: (tab: 'overview' | 'strategy' | 'requirements' | 'team') => void;
+  onSubTabChange?: (tab: 'overview' | 'strategy' | 'requirements' | 'creative-masters' | 'team') => void;
 }
 
 interface FunnelConfig {
@@ -28,6 +29,7 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   onBack, 
   campaignData, 
   onSave,
+  onSaveMasters,
   isEmbedded = false,
   initialConfig = [],
   viewMode = 'strategy',
@@ -76,11 +78,13 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   const [allInventoriesByPlatform, setAllInventoriesByPlatform] = useState<Record<string, string[]>>({});
   const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [showUpdateConfirmModal, setShowUpdateConfirmModal] = useState(false);
 
   // Filter states for slicer
   const [selectedChannelFilter, setSelectedChannelFilter] = useState<string>('');
   const [selectedPlatformFilter, setSelectedPlatformFilter] = useState<string>('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<'all' | 'static' | 'video'>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'deselected' | 'edited'>('all');
 
   // Fetch all platforms and their inventories on mount
   React.useEffect(() => {
@@ -188,8 +192,9 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     }));
   };
 
-  const generateAssets = async () => {
+  const generateAssets = async (mode: 'scratch' | 'maintain' = 'scratch') => {
     setLoading(true);
+    setShowUpdateConfirmModal(false);
     
     try {
       const activeConfigs = funnelConfigs.filter(c => c && activeStages.has(c.stage));
@@ -206,7 +211,68 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
       };
 
       const identifiedAssets = await assetService.identifyAssets(query);
-      setResults(identifiedAssets);
+      
+      if (mode === 'maintain' && results.length > 0) {
+        // Merge logic: Maintain previous exclusions and edits if they still apply
+        const mergedAssets = identifiedAssets.map(newAsset => {
+          // Find matching asset in previous results
+          const previousAsset = results.find(prev => 
+            prev.channel === newAsset.channel && 
+            prev.platform === newAsset.platform && 
+            prev.formatName === newAsset.formatName
+          );
+
+          if (!previousAsset) return newAsset;
+
+          // Restore selection status
+          const selected = previousAsset.selected;
+          
+          // Restore edits if applicable
+          let isEdited = previousAsset.isEdited;
+          let selectedRatios = [...newAsset.selectedRatios];
+          let selectedLengths = [...newAsset.selectedLengths];
+          let aspectRatiosString = newAsset.aspectRatios;
+          let lengthsString = newAsset.lengths;
+
+          if (isEdited) {
+            // Only maintain ratios/lengths that are still available in the new definition
+            const maintainedRatios = previousAsset.selectedRatios.filter(r => 
+              newAsset.availableRatios.includes(r)
+            );
+            const maintainedLengths = previousAsset.selectedLengths.filter(l => 
+              newAsset.availableLengths.includes(l)
+            );
+
+            // If we have any maintained specs, use them. Otherwise, default to the new ones and clear isEdited
+            if (maintainedRatios.length > 0 || maintainedLengths.length > 0) {
+              if (maintainedRatios.length > 0) {
+                selectedRatios = maintainedRatios;
+                aspectRatiosString = maintainedRatios.join(', ');
+              }
+              if (maintainedLengths.length > 0) {
+                selectedLengths = maintainedLengths;
+                lengthsString = maintainedLengths.join(', ');
+              }
+            } else {
+              isEdited = false;
+            }
+          }
+
+          return {
+            ...newAsset,
+            selected,
+            isEdited,
+            selectedRatios,
+            selectedLengths,
+            aspectRatios: aspectRatiosString,
+            lengths: lengthsString
+          };
+        });
+        setResults(mergedAssets);
+      } else {
+        setResults(identifiedAssets);
+      }
+      onSubTabChange?.('requirements');
     } catch (error) {
       console.error('Error generating assets:', error);
     } finally {
@@ -245,6 +311,15 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     }));
   };
 
+  const handleGroupMasters = () => {
+    if (onSaveMasters) {
+      const masters = assetService.groupMasterAssets(results);
+      onSaveMasters(masters);
+      // Change tab to creative masters if callback provided
+      onSubTabChange?.('creative-masters');
+    }
+  };
+
   // Filtering logic for the slicer
   const filteredResults = results.filter(asset => {
     const channelMatch = !selectedChannelFilter || asset.channel === selectedChannelFilter;
@@ -252,45 +327,74 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
     const typeMatch = selectedTypeFilter === 'all' || 
                     (selectedTypeFilter === 'video' && asset.requiresVideo) ||
                     (selectedTypeFilter === 'static' && !asset.requiresVideo);
-    return channelMatch && platformMatch && typeMatch;
+    
+    const statusMatch = selectedStatusFilter === 'all' ||
+                      (selectedStatusFilter === 'deselected' && !asset.selected) ||
+                      (selectedStatusFilter === 'edited' && asset.isEdited && asset.selected);
+                      
+    return channelMatch && platformMatch && typeMatch && statusMatch;
   });
+
+  // Calculate summary stats
+  const stats = React.useMemo(() => {
+    const activeResults = results;
+    const channels = new Set(activeResults.map(r => r.channel));
+    const platforms = new Set(activeResults.map(r => r.platform));
+    const formats = new Set(activeResults.map(r => r.formatName));
+    
+    // Count total variants (selected variants in selected rows)
+    let totalVariants = 0;
+    activeResults.forEach(r => {
+      if (r.selected) {
+        totalVariants += (r.selectedRatios.length * (r.selectedLengths.length || 1));
+      }
+    });
+
+    const deselectedRowsCount = activeResults.filter(r => !r.selected).length;
+    const editedRowsCount = activeResults.filter(r => r.isEdited && r.selected).length;
+    
+    // Count total variants deselected (total available - total selected)
+    let variantsDeselected = 0;
+    activeResults.forEach(r => {
+      if (r.selected && r.isEdited) {
+        const totalAvailable = r.availableRatios.length * (r.availableLengths.length || 1);
+        const totalSelected = r.selectedRatios.length * (r.selectedLengths.length || 1);
+        variantsDeselected += (totalAvailable - totalSelected);
+      }
+    });
+
+    return {
+      channels: channels.size,
+      platforms: platforms.size,
+      formats: formats.size,
+      totalVariants,
+      deselectedRowsCount,
+      editedRowsCount,
+      variantsDeselected
+    };
+  }, [results]);
 
   const uniqueChannels = Array.from(new Set(results.map(r => r.channel))).sort();
   const uniquePlatforms = selectedChannelFilter 
     ? Array.from(new Set(results.filter(r => r.channel === selectedChannelFilter).map(r => r.platform))).sort()
     : Array.from(new Set(results.map(r => r.platform))).sort();
 
-  if (viewMode === 'strategy') {
-    return (
-      <div className={`workflow-container-redesign ${isEmbedded ? 'embedded' : ''}`}>
+  return (
+    <>
+      {viewMode === 'strategy' ? (
+        <div className={`workflow-container-redesign ${isEmbedded ? 'embedded' : ''}`}>
         <div className="workflow-content-redesign">
-          {!isEmbedded && (
-            <header className="redesign-header">
-              <div className="header-top">
-                <button className="back-link" onClick={onBack}>
-                  <span className="material-icons-outlined">arrow_back</span>
-                  Back to Project
-                </button>
-                <div className="project-badge">{campaignData?.name || 'New Project'}</div>
-              </div>
-              <div className="redesign-header-main">
-                <div className="title-area">
-                  <h1>Channel Strategy</h1>
-                  <p>Define your campaign strategy by funnel stage to generate requirements.</p>
-                </div>
-                <div className="header-actions-premium">
-                  <button className="btn-generate-premium" onClick={generateAssets} disabled={activeStages.size === 0}>
-                    <span className="material-icons-outlined">auto_awesome</span>
-                    Update Requirements
-                  </button>
-                </div>
-              </div>
-            </header>
-          )}
+          {/* Removed big header to match project view */}
+
 
           <div className="strategy-section-wrapper">
             <div className="section-header-no-collapse">
               <h3>CHANNEL SELECTION</h3>
+                <button className="btn-generate-premium small" onClick={() => setShowUpdateConfirmModal(true)} disabled={activeStages.size === 0}>
+                  <span className="material-icons-outlined">auto_awesome</span>
+                  Update Assets
+                </button>
+
             </div>
             
             <div className="swimlane-area">
@@ -384,12 +488,8 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
 
         </div>
       </div>
-    );
-  }
-
-  // Requirements View
-  return (
-    <div className={`workflow-container-redesign requirements-layout ${!isSidebarOpen ? 'sidebar-collapsed' : ''} ${isEmbedded ? 'embedded' : ''}`}>
+      ) : (
+        <div className={`workflow-container-redesign requirements-layout ${!isSidebarOpen ? 'sidebar-collapsed' : ''} ${isEmbedded ? 'embedded' : ''}`}>
       <div className="workflow-content-redesign">
         {!isEmbedded && (
           <header className="redesign-header">
@@ -398,16 +498,49 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                 <span className="material-icons-outlined">arrow_back</span>
                 Back to Project
               </button>
-              <div className="project-badge">{campaignData?.name || 'New Project'}</div>
+            <div className="project-badge">{campaignData?.name || 'New Project'}</div>
             </div>
-            <h1>Asset Requirements</h1>
+            <h1>Recommended Assets</h1>
             <p>Finalized list of assets across all selected stages and platforms.</p>
           </header>
         )}
 
         <section className="results-section-redesign">
+          <div className="summary-dashboard">
+            <div className="stats-grid-premium">
+              <div className="stat-card-premium">
+                <span className="stat-label">Channels</span>
+                <span className="stat-value">{stats.channels}</span>
+              </div>
+              <div className="stat-card-premium">
+                <span className="stat-label">Platforms</span>
+                <span className="stat-value">{stats.platforms}</span>
+              </div>
+              <div className="stat-card-premium">
+                <span className="stat-label">Formats</span>
+                <span className="stat-value">{stats.formats}</span>
+              </div>
+              <div className="stat-card-premium">
+                <span className="stat-label">Total Assets</span>
+                <span className="stat-value">{stats.totalVariants}</span>
+              </div>
+              {stats.deselectedRowsCount > 0 && (
+                <div className="stat-card-premium critical">
+                  <span className="stat-label">Deselected Rows</span>
+                  <span className="stat-value">{stats.deselectedRowsCount}</span>
+                </div>
+              )}
+              {stats.variantsDeselected > 0 && (
+                <div className="stat-card-premium warning">
+                  <span className="stat-label">Deselected Variants</span>
+                  <span className="stat-value">{stats.variantsDeselected}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="results-header">
-            <div className="header-title-group">
+            <div className="header-title-group" style={{ visibility: 'hidden', height: 0, padding: 0, margin: 0 }}>
               <h3>RECOMMENDED ASSETS</h3>
               <span className="results-count">{filteredResults.length} assets identified</span>
             </div>
@@ -437,6 +570,21 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                 <span className="material-icons-outlined">filter_list</span>
                 <span>Filters</span>
               </button>
+              <div className="actions-divider"></div>
+              <button className="btn-generate-premium small" onClick={() => setShowUpdateConfirmModal(true)} disabled={activeStages.size === 0}>
+                <span className="material-icons-outlined">auto_awesome</span>
+                Update Assets
+              </button>
+              <div className="actions-divider"></div>
+              <button 
+                className="btn-primary-ghost small" 
+                onClick={handleGroupMasters} 
+                disabled={results.length === 0}
+                style={{ height: '36px', padding: '0 12px' }}
+              >
+                <span className="material-icons-outlined">Groups</span>
+                Group Masters
+              </button>
             </div>
           </div>
           
@@ -449,10 +597,10 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
             <div className="no-results-redesign empty-strategy">
               <span className="material-icons-outlined">TipsAndUpdates</span>
               <h3>No assets identified yet</h3>
-              <p>Go to the Strategy tab to select your channels and generate requirements.</p>
+              <p>Go to the Channel mix tab to select your channels and generate requirements.</p>
               {onSubTabChange && (
                 <button className="btn-primary-ghost" onClick={() => onSubTabChange('strategy')}>
-                  Define Strategy
+                  Define Channel mix
                   <span className="material-icons-outlined">arrow_forward</span>
                 </button>
               )}
@@ -497,13 +645,18 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredResults.map(asset => (
-                      <tr key={asset.id} className={!asset.selected ? 'row-deselected' : ''}>
-                        <td>
-                          <div 
-                            className={`custom-checkbox ${asset.selected ? 'checked' : ''}`}
-                            onClick={() => toggleAssetSelection(asset.id)}
-                          >
+                    {filteredResults.map(asset => {
+                      const isDeselected = !asset.selected;
+                      const isEdited = asset.isEdited && asset.selected;
+                      const rowClass = isDeselected ? 'row-deselected-critical' : isEdited ? 'row-edited-warning' : '';
+                      
+                      return (
+                        <tr key={asset.id} className={rowClass}>
+                          <td>
+                            <div 
+                              className={`custom-checkbox ${asset.selected ? 'checked' : ''}`}
+                              onClick={() => toggleAssetSelection(asset.id)}
+                            >
                             {asset.selected && <span className="material-icons-outlined">check</span>}
                           </div>
                         </td>
@@ -541,12 +694,13 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                           </div>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : (
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : (
             <div className="no-results-redesign">
               <span className="material-icons-outlined">search_off</span>
               <h3>No matches found</h3>
@@ -555,6 +709,7 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                 setSelectedChannelFilter('');
                 setSelectedPlatformFilter('');
                 setSelectedTypeFilter('all');
+                setSelectedStatusFilter('all');
               }}>Clear all filters</button>
             </div>
           )}
@@ -568,6 +723,7 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
             setSelectedChannelFilter('');
             setSelectedPlatformFilter('');
             setSelectedTypeFilter('all');
+            setSelectedStatusFilter('all');
           }}>Reset</button>
         </div>
 
@@ -643,6 +799,30 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
           </div>
         </div>
 
+        <div className="filter-section">
+          <div className="section-title">STATUS</div>
+          <div className="filter-list">
+            <button 
+              className={`filter-item ${selectedStatusFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setSelectedStatusFilter('all')}
+            >
+              All Statuses
+            </button>
+            <button 
+              className={`filter-item ${selectedStatusFilter === 'deselected' ? 'active' : ''}`}
+              onClick={() => setSelectedStatusFilter('deselected')}
+            >
+              Deselected Rows
+            </button>
+            <button 
+              className={`filter-item ${selectedStatusFilter === 'edited' ? 'active' : ''}`}
+              onClick={() => setSelectedStatusFilter('edited')}
+            >
+              Edited (Modified)
+            </button>
+          </div>
+        </div>
+
         <div className="sidebar-footer-stats">
           <div className="stats-row">
             <span>Showing</span>
@@ -650,7 +830,8 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
           </div>
         </div>
       </aside>
-
+    </div>
+      )}
       {editingAssetId && (
         <div className="modal-overlay" onClick={() => setEditingAssetId(null)}>
           <div className="modal-content combined-edit-modal" onClick={e => e.stopPropagation()}>
@@ -725,7 +906,48 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
           </div>
         </div>
       )}
-    </div>
+      {showUpdateConfirmModal && (
+        <div className="modal-overlay" onClick={() => setShowUpdateConfirmModal(false)}>
+          <div className="modal-content update-confirm-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Update Content Requirements</h3>
+              <button className="close-modal" onClick={() => setShowUpdateConfirmModal(false)}>
+                <span className="material-icons-outlined">close</span>
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="modal-description">
+                How would you like to update your asset list?
+              </p>
+              
+              <div className="update-options-grid">
+                <div className="update-option-card" onClick={() => generateAssets('scratch')}>
+                  <div className="option-icon scratch">
+                    <span className="material-icons-outlined">refresh</span>
+                  </div>
+                  <div className="option-content">
+                    <h4>Start from scratch</h4>
+                    <p>Generate a brand new list based on normal rules. All previous exclusions and edits will be reset.</p>
+                  </div>
+                  <span className="material-icons-outlined arrow">chevron_right</span>
+                </div>
+
+                <div className="update-option-card" onClick={() => generateAssets('maintain')}>
+                  <div className="option-icon maintain">
+                    <span className="material-icons-outlined">history</span>
+                  </div>
+                  <div className="option-content">
+                    <h4>Maintain previous edits</h4>
+                    <p>Update the list while preserving excluded rows and variant edits where they still apply.</p>
+                  </div>
+                  <span className="material-icons-outlined arrow">chevron_right</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 

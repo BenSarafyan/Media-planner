@@ -16,6 +16,7 @@ export interface Campaign {
   status: 'setup' | 'active' | 'completed';
   assets?: any[]; // Store generated assets
   asset_config?: any[]; // Store survey configuration
+  master_assets?: any[]; // Store grouped master assets
 }
 
 export const campaignService = {
@@ -79,6 +80,23 @@ export const campaignService = {
 
     if (error) {
       console.error('Error updating campaign assets:', error);
+      return false;
+    }
+
+    return true;
+  },
+
+  updateCampaignMasterAssets: async (id: string, master_assets: any[]): Promise<boolean> => {
+    const { error } = await supabase
+      .from('campaigns')
+      .update({ 
+        master_assets,
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error updating campaign master assets:', error);
       return false;
     }
 

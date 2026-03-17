@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Campaign, campaignService } from '../services/campaignService';
 import { AssetIdentificationWorkflow } from './AssetIdentificationWorkflow';
-import { RecommendedAsset } from '../services/assetService';
+import { CreativeMastersView } from './CreativeMastersView';
+import { RecommendedAsset, MasterAsset } from '../services/assetService';
 import { getFlagUrl } from '../utils/marketUtils';
 import './ProjectView.css';
 
@@ -13,7 +14,7 @@ interface ProjectViewProps {
   onSubTabChange?: (tab: ProjectTab) => void;
 }
 
-type ProjectTab = 'overview' | 'strategy' | 'requirements' | 'team';
+type ProjectTab = 'overview' | 'strategy' | 'requirements' | 'creative-masters' | 'team';
 
 export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, activeSubTab, onSubTabChange }) => {
   const [internalTab, setInternalTab] = useState<ProjectTab>('overview');
@@ -22,6 +23,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, ac
 
   const [currentAssets, setCurrentAssets] = useState<RecommendedAsset[]>(campaign.assets || []);
   const [currentConfig, setCurrentConfig] = useState<any[]>(campaign.asset_config || []);
+  const [currentMasters, setCurrentMasters] = useState<MasterAsset[]>(campaign.master_assets || []);
 
   const handleSaveAssets = async (assets: RecommendedAsset[], config: any[]) => {
     const success = await campaignService.updateCampaignAssets(campaign.id, assets, config);
@@ -33,6 +35,19 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, ac
           ...campaign,
           assets,
           asset_config: config
+        });
+      }
+    }
+  };
+
+  const handleSaveMasters = async (masters: MasterAsset[]) => {
+    const success = await campaignService.updateCampaignMasterAssets(campaign.id, masters);
+    if (success) {
+      setCurrentMasters(masters);
+      if (onUpdate) {
+        onUpdate({
+          ...campaign,
+          master_assets: masters
         });
       }
     }
@@ -53,13 +68,19 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, ac
           className={`nav-tab ${activeTab === 'strategy' ? 'active' : ''}`}
           onClick={() => setActiveTab('strategy')}
         >
-          Strategy
+          Channel mix
         </button>
         <button 
           className={`nav-tab ${activeTab === 'requirements' ? 'active' : ''}`}
           onClick={() => setActiveTab('requirements')}
         >
-          Requirements
+          Recommended Assets
+        </button>
+        <button 
+          className={`nav-tab ${activeTab === 'creative-masters' ? 'active' : ''}`}
+          onClick={() => setActiveTab('creative-masters')}
+        >
+          Creative Masters
         </button>
         <button 
           className={`nav-tab ${activeTab === 'team' ? 'active' : ''}`}
@@ -154,38 +175,31 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, ac
           )}
 
 
-        {activeTab === 'strategy' && (
+        {(activeTab === 'strategy' || activeTab === 'requirements') && (
           <div className="assets-tab-content">
             <AssetIdentificationWorkflow 
               campaignData={{
                 ...campaign,
                 assets: currentAssets,
-                asset_config: currentConfig
+                asset_config: currentConfig,
+                master_assets: currentMasters
               }} 
               onBack={() => setActiveTab('overview')}
               onSave={handleSaveAssets}
+              onSaveMasters={handleSaveMasters}
               isEmbedded={true}
               initialConfig={currentConfig}
-              viewMode="strategy"
+              viewMode={activeTab === 'strategy' ? 'strategy' : 'requirements'}
               onSubTabChange={setActiveTab}
             />
           </div>
         )}
 
-        {activeTab === 'requirements' && (
-          <div className="assets-tab-content">
-            <AssetIdentificationWorkflow 
-              campaignData={{
-                ...campaign,
-                assets: currentAssets,
-                asset_config: currentConfig
-              }} 
-              onBack={() => setActiveTab('overview')}
-              onSave={handleSaveAssets}
-              isEmbedded={true}
-              initialConfig={currentConfig}
-              viewMode="requirements"
-              onSubTabChange={setActiveTab}
+        {activeTab === 'creative-masters' && (
+          <div className="assets-tab-content" style={{ padding: '0px' }}>
+            <CreativeMastersView 
+              masters={currentMasters}
+              projectName={campaign.name}
             />
           </div>
         )}
