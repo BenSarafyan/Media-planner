@@ -3,6 +3,8 @@
   animation: fadeIn 0.4s ease-out;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 }
 
 @keyframes fadeIn {
@@ -16,9 +18,7 @@
   padding: 0 20px;
   background: white;
   border-bottom: 1px solid #e2e8f0;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  flex-shrink: 0;
 }
 
 .nav-tab {
@@ -52,15 +52,28 @@
 }
 
 .project-content-area {
-  padding: 1rem;
+  padding: 0;
   width: 100%;
   margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.assets-tab-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .vertical-stack {
   display: flex;
   flex-direction: column;
   gap: 24px;
+  padding: 1rem;
+  overflow-y: auto;
 }
 
 /* Info Section Styles */

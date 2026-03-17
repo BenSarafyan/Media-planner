@@ -9,12 +9,17 @@ interface ProjectViewProps {
   campaign: Campaign;
   onBack: () => void;
   onUpdate?: (campaign: Campaign) => void;
+  activeSubTab?: ProjectTab;
+  onSubTabChange?: (tab: ProjectTab) => void;
 }
 
 type ProjectTab = 'overview' | 'strategy' | 'requirements' | 'team';
 
-export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate }) => {
-  const [activeTab, setActiveTab] = useState<ProjectTab>('overview');
+export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate, activeSubTab, onSubTabChange }) => {
+  const [internalTab, setInternalTab] = useState<ProjectTab>('overview');
+  const activeTab = activeSubTab || internalTab;
+  const setActiveTab = onSubTabChange || setInternalTab;
+
   const [currentAssets, setCurrentAssets] = useState<RecommendedAsset[]>(campaign.assets || []);
   const [currentConfig, setCurrentConfig] = useState<any[]>(campaign.asset_config || []);
 
@@ -162,6 +167,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate }) 
               isEmbedded={true}
               initialConfig={currentConfig}
               viewMode="strategy"
+              onSubTabChange={setActiveTab}
             />
           </div>
         )}
@@ -179,6 +185,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ campaign, onUpdate }) 
               isEmbedded={true}
               initialConfig={currentConfig}
               viewMode="requirements"
+              onSubTabChange={setActiveTab}
             />
           </div>
         )}

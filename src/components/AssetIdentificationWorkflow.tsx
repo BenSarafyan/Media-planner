@@ -11,6 +11,7 @@ interface AssetIdentificationWorkflowProps {
   isEmbedded?: boolean;
   initialConfig?: any[];
   viewMode?: 'strategy' | 'requirements';
+  onSubTabChange?: (tab: 'overview' | 'strategy' | 'requirements' | 'team') => void;
 }
 
 interface FunnelConfig {
@@ -29,25 +30,38 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   onSave,
   isEmbedded = false,
   initialConfig = [],
-  viewMode = 'strategy'
+  viewMode = 'strategy',
+  onSubTabChange
 }) => {
   const STAGES: FunnelStage[] = ['Awareness', 'Consideration', 'Conversion'];
   
   // Initialize with all stages but maybe empty channels
   const [funnelConfigs, setFunnelConfigs] = useState<FunnelConfig[]>(() => {
-    if (initialConfig.length > 0) {
-      return initialConfig.map(c => ({
-        ...c,
-        channels: c.channels || [],
-        selectedInventories: c.selectedInventories || []
-      }));
-    }
-    return STAGES.map(stage => ({
+    const defaultConfigs: FunnelConfig[] = STAGES.map(stage => ({
       stage,
       videoIncluded: false,
       channels: [],
       selectedInventories: []
     }));
+
+    if (initialConfig && Array.isArray(initialConfig) && initialConfig.length > 0) {
+      // Merge initialConfig with defaults to ensure all stages represent
+      return STAGES.map(stage => {
+        const existing = initialConfig.find(c => c && c.stage === stage);
+        const defaultConfig = defaultConfigs.find(c => c.stage === stage)!;
+        
+        if (existing) {
+          return {
+            ...defaultConfig,
+            ...existing,
+            channels: existing.channels || [],
+            selectedInventories: existing.selectedInventories || []
+          };
+        }
+        return defaultConfig;
+      });
+    }
+    return defaultConfigs;
   });
 
   const [activeStages, setActiveStages] = useState<Set<FunnelStage>>(() => {
@@ -177,22 +191,27 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
   const generateAssets = async () => {
     setLoading(true);
     
-    const activeConfigs = funnelConfigs.filter(c => activeStages.has(c.stage));
-    const allPartners = Array.from(new Set(activeConfigs.flatMap(f => f.channels)));
-    const allStages = activeConfigs.map(f => f.stage);
-    const heroVideoAvailable = activeConfigs.some(f => f.videoIncluded);
+    try {
+      const activeConfigs = funnelConfigs.filter(c => c && activeStages.has(c.stage));
+      const allPartners = Array.from(new Set(activeConfigs.flatMap(f => f.channels || [])));
+      const allStages = activeConfigs.map(f => f.stage);
+      const heroVideoAvailable = activeConfigs.some(f => f && f.videoIncluded);
 
-    const query: AssetIdentificationQuery = {
-      funnelStages: allStages,
-      goals: [],
-      partners: allPartners,
-      heroVideoAvailable,
-      selectedInventories: activeConfigs.flatMap(f => f.selectedInventories)
-    };
+      const query: AssetIdentificationQuery = {
+        funnelStages: allStages,
+        goals: [],
+        partners: allPartners,
+        heroVideoAvailable,
+        selectedInventories: activeConfigs.flatMap(f => f.selectedInventories || [])
+      };
 
-    const identifiedAssets = await assetService.identifyAssets(query);
-    setResults(identifiedAssets);
-    setLoading(false);
+      const identifiedAssets = await assetService.identifyAssets(query);
+      setResults(identifiedAssets);
+    } catch (error) {
+      console.error('Error generating assets:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleAssetSelection = (assetId: string) => {
@@ -254,8 +273,18 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                 </button>
                 <div className="project-badge">{campaignData?.name || 'New Project'}</div>
               </div>
-              <h1>Channel Strategy</h1>
-              <p>Define your campaign strategy by funnel stage to generate requirements.</p>
+              <div className="redesign-header-main">
+                <div className="title-area">
+                  <h1>Channel Strategy</h1>
+                  <p>Define your campaign strategy by funnel stage to generate requirements.</p>
+                </div>
+                <div className="header-actions-premium">
+                  <button className="btn-generate-premium" onClick={generateAssets} disabled={activeStages.size === 0}>
+                    <span className="material-icons-outlined">auto_awesome</span>
+                    Update Requirements
+                  </button>
+                </div>
+              </div>
             </header>
           )}
 
@@ -268,8 +297,10 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
                 <section className="funnel-swimlanes">
                   {STAGES.map(stage => {
                     const isActive = activeStages.has(stage);
-                    const config = funnelConfigs.find(f => f.stage === stage)!;
+                    const config = funnelConfigs.find(f => f.stage === stage);
                     const platforms = allPlatformsByStage[stage] || [];
+                    
+                    if (!config) return null; // Safety check
                     
                     return (
                       <div key={stage} className={`swimlane-column ${isActive ? 'active' : ''}`}>
@@ -351,12 +382,6 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
             </div>
           </div>
 
-          <div className="generate-actions">
-            <button className="btn-generate-premium" onClick={generateAssets} disabled={activeStages.size === 0}>
-              Update Asset Requirements
-              <span className="material-icons-outlined">auto_awesome</span>
-            </button>
-          </div>
         </div>
       </div>
     );
@@ -419,6 +444,18 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
             <div className="loading-state-redesign">
               <div className="premium-spinner"></div>
               <p>Refreshing list based on your strategy...</p>
+            </div>
+          ) : results.length === 0 ? (
+            <div className="no-results-redesign empty-strategy">
+              <span className="material-icons-outlined">TipsAndUpdates</span>
+              <h3>No assets identified yet</h3>
+              <p>Go to the Strategy tab to select your channels and generate requirements.</p>
+              {onSubTabChange && (
+                <button className="btn-primary-ghost" onClick={() => onSubTabChange('strategy')}>
+                  Define Strategy
+                  <span className="material-icons-outlined">arrow_forward</span>
+                </button>
+              )}
             </div>
           ) : filteredResults.length > 0 ? (
             resultsDisplayMode === 'grid' ? (
@@ -512,7 +549,8 @@ export const AssetIdentificationWorkflow: React.FC<AssetIdentificationWorkflowPr
           ) : (
             <div className="no-results-redesign">
               <span className="material-icons-outlined">search_off</span>
-              <p>No assets match your current filters.</p>
+              <h3>No matches found</h3>
+              <p>Adjust your filters or clear them to see all recommended assets.</p>
               <button className="btn-text" onClick={() => {
                 setSelectedChannelFilter('');
                 setSelectedPlatformFilter('');

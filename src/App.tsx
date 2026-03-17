@@ -14,6 +14,7 @@ function App() {
   const [workflowStep, setWorkflowStep] = useState<'setup' | 'questions'>('setup')
   const [campaignData, setCampaignData] = useState<Campaign | null>(null)
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
+  const [projectSubTab, setProjectSubTab] = useState<'overview' | 'strategy' | 'requirements' | 'team'>('overview')
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [isSidebarHovered, setIsSidebarHovered] = useState(false)
@@ -44,6 +45,7 @@ function App() {
 
   const handleSelectCampaign = (campaign: Campaign) => {
     setSelectedCampaign(campaign);
+    setProjectSubTab('overview');
     setActiveTab('project-view');
   };
 
@@ -98,14 +100,54 @@ function App() {
             {!isCollapsed && <span>All Projects</span>}
           </button>
           {selectedCampaign && (
-            <button 
-              className={`sidebar-nav-item active-project-nav ${activeTab === 'project-view' ? 'active' : ''}`}
-              onClick={() => setActiveTab('project-view')}
-              title={selectedCampaign.name}
-            >
-              <span className="material-icons-outlined">folder_special</span>
-              {!isCollapsed && <span className="nav-text-truncate">{selectedCampaign.name}</span>}
-            </button>
+            <div className={`sidebar-project-group ${activeTab === 'project-view' ? 'active' : ''}`}>
+              <button 
+                className={`sidebar-nav-item active-project-nav ${activeTab === 'project-view' && projectSubTab === 'overview' ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveTab('project-view');
+                  setProjectSubTab('overview');
+                }}
+                title={selectedCampaign.name}
+              >
+                <span className="material-icons-outlined">folder_special</span>
+                {!isCollapsed && <span className="nav-text-truncate">{selectedCampaign.name}</span>}
+              </button>
+              
+              {!isCollapsed && (
+                <div className="sidebar-sub-nav">
+                  <button 
+                    className={`sidebar-sub-nav-item ${activeTab === 'project-view' && projectSubTab === 'strategy' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTab('project-view');
+                      setProjectSubTab('strategy');
+                    }}
+                  >
+                    <span className="material-icons-outlined">insights</span>
+                    <span>Strategy</span>
+                  </button>
+                  <button 
+                    className={`sidebar-sub-nav-item ${activeTab === 'project-view' && projectSubTab === 'requirements' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTab('project-view');
+                      setProjectSubTab('requirements');
+                    }}
+                  >
+                    <span className="material-icons-outlined">assignment</span>
+                    <span>Requirements</span>
+                  </button>
+                  <button 
+                    className={`sidebar-sub-nav-item ${activeTab === 'project-view' && projectSubTab === 'team' ? 'active' : ''}`}
+                    onClick={() => {
+                      setActiveTab('project-view');
+                      setProjectSubTab('team');
+                    }}
+                  >
+                    <span className="material-icons-outlined">group</span>
+                    <span>Team</span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </nav>
 
@@ -201,6 +243,8 @@ function App() {
               campaign={selectedCampaign} 
               onBack={handleViewAllCampaigns} 
               onUpdate={(updated) => setSelectedCampaign(updated)}
+              activeSubTab={projectSubTab}
+              onSubTabChange={setProjectSubTab}
             />
           )}
 
